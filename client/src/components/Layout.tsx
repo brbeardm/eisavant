@@ -74,7 +74,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <header className="site-header">
         <div className="container nav">
           <Link to="/" className="brand">
-            Eisa<span>vant</span>
+            EI<span>savant</span>
           </Link>
           <nav className="nav-links">
             <Link to="/testimonials">Testimonials</Link>
