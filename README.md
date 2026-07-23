@@ -45,6 +45,6 @@ All project documentation lives in [`zzz_documentation/`](zzz_documentation/):
 
 - **Payments are stubbed**: plan selection is recorded, the Pay button stops short of
   any processor call. No card data is ever collected.
-- Homepage testimonials are **fictional placeholders** — replace with licensed,
-  consented testimonials before launch.
+- Aside from D. Brian Beardmore's, the homepage testimonials are **fictional
+  placeholders** — replace with licensed, consented testimonials before launch.
 - Email verification and password reset are not yet implemented.
