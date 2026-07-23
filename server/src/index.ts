@@ -9,6 +9,7 @@ import { pool } from './db/pool.js';
 import { errorHandler } from './middleware/errors.js';
 import { adminRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
+import { clientRouter } from './routes/client.js';
 import { paymentsRouter } from './routes/payments.js';
 import { profileRouter } from './routes/profile.js';
 import { testimonialsRouter } from './routes/testimonials.js';
@@ -45,6 +46,7 @@ app.use('/api/profile', profileRouter);
 app.use('/api/testimonials', testimonialsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/client', clientRouter);
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 app.use(errorHandler);

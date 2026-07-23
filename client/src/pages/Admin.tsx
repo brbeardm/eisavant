@@ -46,6 +46,11 @@ export function AdminPage() {
           <div>
             <div className="eyebrow">{user?.role === 'admin' ? 'Administration' : 'Support'}</div>
             <h2>Members</h2>
+            {user?.role === 'admin' && (
+              <Link to="/admin/clients" className="btn btn-outline-dark btn-sm">
+                Clients &amp; Positions →
+              </Link>
+            )}
           </div>
           <label className="field" style={{ minWidth: 260 }}>
             Search

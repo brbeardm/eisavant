@@ -51,9 +51,19 @@ function UserMenu() {
           <Link to="/dashboard" role="menuitem" onClick={() => setOpen(false)}>
             My Profile
           </Link>
+          {user.role === 'client' && (
+            <Link to="/client" role="menuitem" onClick={() => setOpen(false)}>
+              Client Portal
+            </Link>
+          )}
           {(user.role === 'admin' || user.role === 'support') && (
             <Link to="/admin" role="menuitem" onClick={() => setOpen(false)}>
               Members
+            </Link>
+          )}
+          {user.role === 'admin' && (
+            <Link to="/admin/clients" role="menuitem" onClick={() => setOpen(false)}>
+              Clients &amp; Positions
             </Link>
           )}
           <hr />
@@ -74,7 +84,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <header className="site-header">
         <div className="container nav">
           <Link to="/" className="brand">
-            EI<span>savant</span>
+            Ei<span>savant</span>
           </Link>
           <nav className="nav-links">
             <Link to="/testimonials">Testimonials</Link>

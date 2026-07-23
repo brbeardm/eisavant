@@ -19,15 +19,16 @@ const pool = new pg.Pool({
   ssl: url.includes('railway') ? { rejectUnauthorized: false } : undefined,
 });
 
-type Ctx = { userId: string | null; role: string };
+type Ctx = { userId: string | null; role: string; companyId?: string | null };
 
 async function withCtx<T>(ctx: Ctx, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query(
-      `SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true)`,
-      [ctx.userId ?? '', ctx.role],
+      `SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true),
+              set_config('app.company_id', $3, true)`,
+      [ctx.userId ?? '', ctx.role, ctx.companyId ?? ''],
     );
     const result = await fn(client);
     await client.query('COMMIT');
@@ -159,13 +160,82 @@ async function main() {
     }),
   );
 
-  console.log('\n— admin —');
+  console.log('\n— client (disclosure model) —');
   const adminCtx: Ctx = { userId: alice, role: 'admin' };
+  // Admin sets up: two companies; one position each; alice on position A as
+  // 'anonymous', bob on position A as 'full' (with a CV on file).
+  const setup = await withCtx(adminCtx, async (c) => {
+    const co = async (name: string) =>
+      (await c.query(`INSERT INTO client_companies (name) VALUES ($1) RETURNING id`, [name]))
+        .rows[0].id as string;
+    const companyA = await co(`rls-test-acme-${stamp}`);
+    const companyB = await co(`rls-test-other-${stamp}`);
+    const pos = async (company: string, title: string) =>
+      (await c.query(
+        `INSERT INTO positions (client_company_id, title) VALUES ($1, $2) RETURNING id`,
+        [company, title],
+      )).rows[0].id as string;
+    const posA = await pos(companyA, 'CEO');
+    await pos(companyB, 'CEO');
+    await c.query(
+      `INSERT INTO position_candidates (position_id, candidate_user_id, disclosure_level, summary)
+       VALUES ($1, $2, 'anonymous', 'Confidential operator'), ($1, $3, 'full', 'Strong finalist')`,
+      [posA, alice, bob],
+    );
+    return { companyA, companyB, posA };
+  });
+  await withCtx({ userId: bob, role: 'ceo' }, (c) =>
+    c.query(
+      `INSERT INTO documents (user_id, kind, filename, mime_type, size_bytes, data)
+       VALUES ($1, 'cv', 'bob-cv.pdf', 'application/pdf', 4, '\\x74657374')`,
+      [bob],
+    ),
+  );
+
+  // Distinct identity — a client user is never one of the candidates.
+  const clientCtx: Ctx = { userId: crypto.randomUUID(), role: 'client', companyId: setup.companyA };
+  const clientPositions = await withCtx(clientCtx, (c) => c.query('SELECT id FROM positions'));
+  check(
+    "client sees only their own company's positions",
+    clientPositions.rowCount === 1 && clientPositions.rows[0].id === setup.posA,
+  );
+  const anonProfile = await withCtx(clientCtx, (c) =>
+    c.query('SELECT * FROM profiles WHERE user_id = $1', [alice]),
+  );
+  check("client cannot see an 'anonymous' candidate's profile", anonProfile.rowCount === 0);
+  const fullProfile = await withCtx(clientCtx, (c) =>
+    c.query('SELECT * FROM profiles WHERE user_id = $1', [bob]),
+  );
+  check("client sees a 'full' candidate's profile", fullProfile.rowCount === 1);
+  const fullCv = await withCtx(clientCtx, (c) =>
+    c.query(`SELECT filename FROM documents WHERE user_id = $1 AND kind = 'cv'`, [bob]),
+  );
+  check("client can read a 'full' candidate's CV", fullCv.rowCount === 1);
+  const anonCv = await withCtx(clientCtx, (c) =>
+    c.query(`SELECT filename FROM documents WHERE user_id = $1 AND kind = 'cv'`, [alice]),
+  );
+  check("client cannot read an 'anonymous' candidate's CV", anonCv.rowCount === 0);
+  await expectDenied('client cannot create positions', () =>
+    withCtx(clientCtx, (c) =>
+      c.query(`INSERT INTO positions (client_company_id, title) VALUES ($1, 'Rogue')`, [
+        setup.companyA,
+      ]),
+    ),
+  );
+  const supportRecruiting = await withCtx({ userId: alice, role: 'support' }, (c) =>
+    c.query('SELECT id FROM positions'),
+  );
+  check('support cannot see recruiting data (narrowed visibility)', supportRecruiting.rowCount === 0);
+
+  console.log('\n— admin —');
   const audit = await withCtx(adminCtx, (c) => c.query('SELECT count(*) FROM audit_log'));
   check('admin can read audit_log', audit.rowCount === 1);
-  const cleanup = await withCtx(adminCtx, (c) =>
-    c.query('DELETE FROM users WHERE id = ANY($1)', [[alice, bob]]),
-  );
+  const cleanup = await withCtx(adminCtx, async (c) => {
+    await c.query('DELETE FROM client_companies WHERE id = ANY($1)', [
+      [setup.companyA, setup.companyB],
+    ]);
+    return c.query('DELETE FROM users WHERE id = ANY($1)', [[alice, bob]]);
+  });
   check('admin can delete users (cleanup)', cleanup.rowCount === 2);
 
   console.log(`\n${passed} passed, ${failed} failed`);

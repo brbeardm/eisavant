@@ -4,11 +4,12 @@ import { api } from './api';
 export interface SessionUser {
   id: string;
   email: string;
-  role: 'ceo' | 'support' | 'admin';
+  role: 'ceo' | 'support' | 'admin' | 'client';
   status: string;
   first_name: string | null;
   last_name: string | null;
   has_photo: boolean;
+  client_company_id: string | null;
 }
 
 interface AuthState {

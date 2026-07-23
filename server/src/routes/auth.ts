@@ -112,7 +112,7 @@ authRouter.post('/login', authLimiter, async (req, res, next) => {
         [email],
       );
       return rows[0] as
-        | { id: string; password_hash: string; role: AppRole; status: string }
+        | { id: string; password_hash: string; role: AppRole; status: string; client_company_id: string | null }
         | undefined;
     });
 
@@ -121,11 +121,15 @@ authRouter.post('/login', authLimiter, async (req, res, next) => {
     if (!ok) throw new HttpError(401, 'Invalid email or password');
     if (row.status === 'suspended') throw new HttpError(403, 'This account is suspended');
 
-    await withContext({ userId: row.id, role: row.role }, (client) =>
+    await withContext({ userId: row.id, role: row.role, companyId: row.client_company_id }, (client) =>
       logAudit(client, { actorUserId: row.id, action: 'user.login', targetUserId: row.id }),
     );
 
-    res.cookie(AUTH_COOKIE, issueToken({ id: row.id, role: row.role }), cookieOptions());
+    res.cookie(
+      AUTH_COOKIE,
+      issueToken({ id: row.id, role: row.role, companyId: row.client_company_id }),
+      cookieOptions(),
+    );
     return res.json({ id: row.id, role: row.role });
   } catch (err) {
     return next(err);
@@ -141,7 +145,7 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
   try {
     const me = await withContext({ userId: req.user!.id, role: req.user!.role }, async (client) => {
       const { rows } = await client.query(
-        `SELECT u.id, u.email, u.role, u.status, p.first_name, p.last_name,
+        `SELECT u.id, u.email, u.role, u.status, u.client_company_id, p.first_name, p.last_name,
                 EXISTS (
                   SELECT 1 FROM documents d
                   WHERE d.user_id = u.id AND d.kind = 'profile_photo'

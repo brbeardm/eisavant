@@ -6,8 +6,9 @@ import { useAuth } from '../auth';
 interface Detail {
   id: string;
   email: string;
-  role: 'ceo' | 'support' | 'admin';
+  role: 'ceo' | 'support' | 'admin' | 'client';
   status: 'pending_payment' | 'active' | 'suspended';
+  client_company_id: string | null;
   created_at: string;
   first_name: string | null;
   last_name: string | null;
@@ -32,6 +33,7 @@ export function AdminUserDetailPage() {
   const isAdmin = user?.role === 'admin';
 
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [note, setNote] = useState('');
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,9 +41,12 @@ export function AdminUserDetailPage() {
   const load = () => api.get(`/api/admin/users/${id}`).then(setDetail).catch(() => setDetail(null));
   useEffect(() => {
     void load();
-  }, [id]);
+    if (isAdmin) {
+      api.get('/api/admin/companies').then(setCompanies).catch(() => setCompanies([]));
+    }
+  }, [id, isAdmin]);
 
-  const patch = async (updates: { role?: string; status?: string }) => {
+  const patch = async (updates: { role?: string; status?: string; clientCompanyId?: string | null }) => {
     setBusy(true);
     setNotice(null);
     try {
@@ -118,8 +123,25 @@ export function AdminUserDetailPage() {
                   <option value="ceo">ceo</option>
                   <option value="support">support</option>
                   <option value="admin">admin</option>
+                  <option value="client">client</option>
                 </select>
               </label>
+              {detail.role === 'client' && (
+                <label className="field">
+                  Client company
+                  <select
+                    value={detail.client_company_id ?? ''}
+                    disabled={busy}
+                    onChange={(e) => patch({ clientCompanyId: e.target.value || null })}
+                  >
+                    <option value="">— unassigned —</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <div className="hint">Portal access requires a company; the user must sign in again after changes.</div>
+                </label>
+              )}
               <label className="field">
                 Status
                 <select value={detail.status} disabled={busy} onChange={(e) => patch({ status: e.target.value })}>

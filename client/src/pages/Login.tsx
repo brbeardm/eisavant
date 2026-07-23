@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError, api } from '../api';
+import { homeFor } from '../App';
 import { useAuth } from '../auth';
 
 export function LoginPage() {
@@ -19,8 +20,7 @@ export function LoginPage() {
     try {
       const result = await api.post('/api/auth/login', { email, password });
       await refresh();
-      const fallback = result.role === 'ceo' ? '/dashboard' : '/admin';
-      navigate(location.state?.from ?? fallback, { replace: true });
+      navigate(location.state?.from ?? homeFor(result.role), { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Sign in failed — please try again.');
     } finally {

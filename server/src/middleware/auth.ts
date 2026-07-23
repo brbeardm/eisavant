@@ -5,11 +5,12 @@ import { HttpError } from './errors.js';
 
 export const AUTH_COOKIE = 'eisavant_token';
 
-export type AppRole = 'ceo' | 'support' | 'admin';
+export type AppRole = 'ceo' | 'support' | 'admin' | 'client';
 
 export interface AuthUser {
   id: string;
   role: AppRole;
+  companyId?: string | null; // client-role users only
 }
 
 declare module 'express-serve-static-core' {
@@ -19,9 +20,16 @@ declare module 'express-serve-static-core' {
 }
 
 export function issueToken(user: AuthUser): string {
-  return jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, {
-    expiresIn: config.jwtExpiresIn as jwt.SignOptions['expiresIn'],
-  });
+  return jwt.sign(
+    { sub: user.id, role: user.role, cid: user.companyId ?? null },
+    config.jwtSecret,
+    { expiresIn: config.jwtExpiresIn as jwt.SignOptions['expiresIn'] },
+  );
+}
+
+/** Session context for withContext(), derived from the verified JWT. */
+export function ctxOf(req: Request): { userId: string; role: AppRole; companyId: string | null } {
+  return { userId: req.user!.id, role: req.user!.role, companyId: req.user!.companyId ?? null };
 }
 
 export function cookieOptions() {
@@ -42,7 +50,11 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction) {
     if (typeof payload.sub !== 'string' || typeof payload.role !== 'string') {
       throw new Error('malformed token');
     }
-    req.user = { id: payload.sub, role: payload.role as AppRole };
+    req.user = {
+      id: payload.sub,
+      role: payload.role as AppRole,
+      companyId: typeof payload.cid === 'string' ? payload.cid : null,
+    };
     return next();
   } catch {
     return next(new HttpError(401, 'Session expired — please sign in again'));

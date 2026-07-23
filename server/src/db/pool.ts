@@ -13,7 +13,8 @@ export const pool = new Pool({
 
 export interface SessionContext {
   userId: string | null; // null for unauthenticated (registration, public pages)
-  role: 'anon' | 'ceo' | 'support' | 'admin';
+  role: 'anon' | 'ceo' | 'support' | 'admin' | 'client';
+  companyId?: string | null; // client-role users only
 }
 
 export const ANON: SessionContext = { userId: null, role: 'anon' };
@@ -22,8 +23,9 @@ export const ANON: SessionContext = { userId: null, role: 'anon' };
  *  anon to the newly created user so profile/document inserts pass RLS). */
 export async function setContext(client: pg.PoolClient, ctx: SessionContext): Promise<void> {
   await client.query(
-    `SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true)`,
-    [ctx.userId ?? '', ctx.role],
+    `SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true),
+            set_config('app.company_id', $3, true)`,
+    [ctx.userId ?? '', ctx.role, ctx.companyId ?? ''],
   );
 }
 
@@ -39,10 +41,7 @@ export async function withContext<T>(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(
-      `SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true)`,
-      [ctx.userId ?? '', ctx.role],
-    );
+    await setContext(client, ctx);
     const result = await fn(client);
     await client.query('COMMIT');
     return result;

@@ -54,8 +54,36 @@ export const paymentIntentSchema = z.object({
 });
 
 export const adminUserUpdateSchema = z.object({
-  role: z.enum(['ceo', 'support', 'admin']).optional(),
+  role: z.enum(['ceo', 'support', 'admin', 'client']).optional(),
   status: z.enum(['pending_payment', 'active', 'suspended']).optional(),
+  clientCompanyId: z.string().uuid().nullable().optional(),
+});
+
+export const companySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  contactEmail: z.string().trim().email().max(254).or(z.literal('')).optional().default(''),
+});
+
+export const positionSchema = z.object({
+  clientCompanyId: z.string().uuid(),
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(5000).optional().default(''),
+});
+
+export const DISCLOSURE_LEVELS = ['anonymous', 'identified', 'full'] as const;
+export const CANDIDATE_STAGES = ['sourced', 'screening', 'interviewing', 'finalist', 'placed'] as const;
+
+export const candidateAssignSchema = z.object({
+  candidateUserId: z.string().uuid(),
+  disclosureLevel: z.enum(DISCLOSURE_LEVELS).optional().default('anonymous'),
+  stage: z.enum(CANDIDATE_STAGES).optional().default('sourced'),
+  summary: z.string().trim().max(2000).optional().default(''),
+});
+
+export const candidateUpdateSchema = z.object({
+  disclosureLevel: z.enum(DISCLOSURE_LEVELS).optional(),
+  stage: z.enum(CANDIDATE_STAGES).optional(),
+  summary: z.string().trim().max(2000).optional(),
 });
 
 export const supportNoteSchema = z.object({
