@@ -8,6 +8,7 @@ export interface SessionUser {
   status: string;
   first_name: string | null;
   last_name: string | null;
+  has_photo: boolean;
 }
 
 interface AuthState {

@@ -141,7 +141,11 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
   try {
     const me = await withContext({ userId: req.user!.id, role: req.user!.role }, async (client) => {
       const { rows } = await client.query(
-        `SELECT u.id, u.email, u.role, u.status, p.first_name, p.last_name
+        `SELECT u.id, u.email, u.role, u.status, p.first_name, p.last_name,
+                EXISTS (
+                  SELECT 1 FROM documents d
+                  WHERE d.user_id = u.id AND d.kind = 'profile_photo'
+                ) AS has_photo
          FROM users u LEFT JOIN profiles p ON p.user_id = u.id
          WHERE u.id = $1`,
         [req.user!.id],

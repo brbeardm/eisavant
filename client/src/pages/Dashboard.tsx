@@ -31,7 +31,7 @@ const STATUS_COPY: Record<string, string> = {
 };
 
 export function DashboardPage() {
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -86,6 +86,7 @@ export function DashboardPage() {
       setNotice({ kind: 'success', text: `${endpoint === 'cv' ? 'CV' : 'Photo'} uploaded.` });
       setPhotoVersion((v) => v + 1);
       await load();
+      await refresh(); // header chip picks up a newly uploaded photo
     } catch (err) {
       setNotice({
         kind: 'error',

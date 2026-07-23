@@ -7,6 +7,7 @@ import { DashboardPage } from './pages/Dashboard';
 import { HomePage } from './pages/Home';
 import { LoginPage } from './pages/Login';
 import { RegisterPage } from './pages/Register';
+import { TestimonialsPage } from './pages/Testimonials';
 
 function RequireAuth({ children, staffOnly = false }: { children: JSX.Element; staffOnly?: boolean }) {
   const { user, loading } = useAuth();
@@ -22,6 +23,7 @@ export default function App() {
     <Layout>
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/testimonials" element={<TestimonialsPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
