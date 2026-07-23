@@ -9,3 +9,6 @@ build/
 coverage/
 .vscode/
 .idea/
+
+# Word lock files
+~$*
