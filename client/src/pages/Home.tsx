@@ -3,6 +3,13 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { Avatar } from '../components/Avatar';
 
+// First name for display, skipping leading initials: "D. Brian Beardmore, MBA" → "Brian"
+function firstName(fullName: string): string {
+  const parts = fullName.split(/\s+/).filter(Boolean);
+  const first = parts.find((p) => !/^[A-Z]\.?$/.test(p)) ?? parts[0] ?? '';
+  return first.replace(/[,.]+$/, '');
+}
+
 interface Testimonial {
   id: string;
   ceo_name: string;
@@ -95,7 +102,7 @@ export function HomePage() {
               <article className="testimonial-card" key={t.id}>
                 <blockquote>{t.quote_short}</blockquote>
                 <button className="read-more" onClick={() => setOpenId(t.id)}>
-                  Read {t.ceo_name.split(' ')[0]}'s full story →
+                  Read {firstName(t.ceo_name)}'s full story →
                 </button>
                 <div className="testimonial-person">
                   <Avatar name={t.ceo_name} src={t.photo_url} />
