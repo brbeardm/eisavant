@@ -1,67 +1,152 @@
-# Security Checklist — Response & Assessment
+# Securing the Current Lovable + Supabase Application — Point-by-Point Response
 
-**Context.** The security checklist provided is written for applications built
-on **Lovable + Supabase**, where the database is exposed through an
-auto-generated API and security depends on correctly configured Supabase
-policies. The platform architecture we are proposing is **not** built on
-Supabase: it is a custom Express/TypeScript API in front of PostgreSQL hosted
-on Railway, and the database is never directly reachable from a browser. That
-architectural difference resolves several checklist items by construction. The
-checklist is *good advice* — none of it is noise — but in this architecture
-most items are already implemented, and items 1–3 are continuously re-verified
-by an automated test suite rather than checked by hand.
+**Scope.** This document responds to the security checklist for the existing
+Lovable + Supabase application in DEV. The recommendation is to **stay on
+Lovable + Supabase** and harden the current build. Each point below maps to a
+concrete fix, verification step, or operating practice on that stack — no
+re-platforming is proposed.
 
-Status legend: ✅ satisfied · 🤝 satisfied, with an action for the account owner
-· ⏳ agreed, planned before real confidential data.
+---
 
-## The consultant's six risk areas
+## Part 1 — The six risk areas: how to fix each in the current app
 
-| # | Concern (Supabase framing) | Response | Status |
-|---|---|---|---|
-| A | Missing or overly broad Row Level Security policies | RLS is `ENABLE` + `FORCE` on **every** application table with deny-by-default, hand-written policies per role (anonymous, member, support, admin, client). | ✅ |
-| B | Accidentally exposing a secret or service-role key | There is no auto-generated database API and no publishable key. The browser holds **zero** database credentials. Owner credentials are used only by migration/seed scripts from a git-ignored environment file; the running app uses a restricted `NOBYPASSRLS` database role. | ✅ |
-| C | Relying on the interface to enforce security | Authorization is enforced three times independently: API middleware, database RLS policies, and a database trigger for privilege changes. Hiding a button protects nothing here either — the database itself refuses unauthorized queries. | ✅ |
-| D | Public file-storage buckets | No storage buckets exist. Résumés and photos are stored **inside PostgreSQL** under the same RLS policies as the owning profile. A client company can only read a candidate's CV at the "full" disclosure level. | ✅ |
-| E | AI-generated policies that are technically valid but too permissive | Policies are hand-scoped and regression-tested by a 23-assertion verification suite that runs against the live database as the app's own restricted role. The suite is rerun after every schema change. | ✅ |
-| F | Sensitive operations running in the browser | All privileged logic runs server-side. Auth tokens are httpOnly cookies (invisible to JavaScript). The payment step is a server-side stub that never touches card data. | ✅ |
+### A. Missing or overly broad Row Level Security policies
 
-## The nine-point minimum checklist
+**Fix in Supabase:**
+1. Find every exposed table with RLS off:
+   ```sql
+   SELECT schemaname, tablename FROM pg_tables
+   WHERE schemaname = 'public'
+     AND tablename NOT IN (
+       SELECT tablename FROM pg_tables t
+       JOIN pg_class c ON c.relname = t.tablename
+       WHERE c.relrowsecurity
+     );
+   ```
+   (Supabase's **Security Advisor** in the dashboard flags these too.)
+2. Enable RLS on each: `ALTER TABLE public.<table> ENABLE ROW LEVEL SECURITY;`
+   A table with RLS on and **no policies** returns nothing — safe by default.
+3. Write one policy **per operation** (SELECT / INSERT / UPDATE / DELETE), not
+   a single `FOR ALL`, and scope each to `auth.uid()`:
+   ```sql
+   CREATE POLICY "read own rows" ON public.profiles
+     FOR SELECT USING (auth.uid() = user_id);
+   CREATE POLICY "update own rows" ON public.profiles
+     FOR UPDATE USING (auth.uid() = user_id)
+     WITH CHECK (auth.uid() = user_id);
+   ```
+4. Treat `USING (true)` as a red flag: acceptable only for intentionally
+   public, read-only content (e.g., published testimonials), never on writes.
 
-| # | Checklist item | Response | Status |
-|---|---|---|---|
-| 1 | Turn on RLS for every table, including profile and junction tables | Done, including junction tables. `FORCE` is set so even the table-owner path cannot bypass it. New tables are private until a policy grants access. | ✅ automated |
-| 2 | Test the app while logged out and while logged in as a different user | This is exactly what the verification suite does: it exercises the database as an anonymous caller, as two different members, as support staff, as a client company, and as admin — and asserts each sees only what they should. | ✅ automated |
-| 3 | Confirm users can only retrieve their own records | Asserted directly: a member sees only their own account row, cannot read or update another member's profile, and cannot read staff notes. Cross-user updates affect 0 rows. | ✅ automated |
-| 4 | Search the code for service_role, sb_secret, passwords, Stripe keys | No such keys exist in this stack. The repository contains no credentials: the environment file is git-ignored, the checked-in example ships placeholders only, and production secrets live in the hosting platform's service variables. Re-scan on every review. | ✅ |
-| 5 | Keep privileged code out of React/frontend files | All privileged code is in the server-side API (the equivalent of Edge Functions in this architecture). The frontend only calls the API with a session cookie. | ✅ |
-| 6 | Review storage bucket policies | N/A — no buckets. Files are RLS-protected database rows. If files later move to object storage for scale, they will be private-only with short-lived signed URLs, never public buckets. | ✅ |
-| 7 | Enable two-factor authentication on platform accounts | Applies to the source-control and hosting accounts that control the infrastructure. Action for the account owner: enable 2FA on both. In-app MFA for admin logins is on the pre-production list. | 🤝 owner action |
-| 8 | Run a security scan after every meaningful database change | The equivalent here is stronger than a generic scan: the RLS verification suite runs after every migration and fails if any policy regresses. It has already caught one real bug during development. | ✅ automated |
-| 9 | Avoid real health/financial/SSN/confidential client data until a professional review | Agreed without reservation. No real confidential data is held during the proof-of-concept phase. Before real candidate dossiers (compensation, interview notes) are stored: professional security review, plus email verification, password reset, MFA, and token revocation. | ⏳ gate before launch |
+### B. Accidentally exposing a secret or service-role key
 
-## What "already automated" means (and what it does not)
+**Fix in Supabase / Lovable:**
+1. Confirm the frontend uses **only** the anon/publishable key. That key is
+   safe to ship *provided RLS is correct* (which is why Part A comes first).
+2. Search the Lovable project code **and prompt history** for `service_role`,
+   `sb_secret`, and any pasted keys — keys pasted into prompts can end up in
+   generated code.
+3. If the service-role key has ever appeared in frontend code or a prompt,
+   **rotate it now**: Supabase Dashboard → Settings → API → rotate.
+4. The service-role key may live only in Supabase **Edge Function secrets**
+   (`supabase secrets set`), never in anything the browser downloads.
 
-Items 1–3 are not *dismissed* — they are *implemented and re-checked by code*
-on every schema change, which is more reliable than a one-time manual review.
-However, the automated suite proves the policies do what **we** intended; it
-cannot prove our intentions are complete. That is why item 9 stands: an
-independent professional review remains the gate before real confidential
-executive-search data enters the system.
+### C. Relying on the interface to enforce security
 
-## Executive-search readiness
+**Fix in Supabase:**
+1. Assume every user can call the auto-generated REST API directly with the
+   anon key — the UI is not a security boundary.
+2. Re-express every "admin-only" or "owner-only" rule that currently exists
+   only as a hidden button/page as an RLS policy or an Edge Function check.
+3. For role-based rules, keep a `user_roles` table (itself RLS-protected) and
+   check it inside policies via a `SECURITY DEFINER` helper:
+   ```sql
+   CREATE FUNCTION public.is_admin() RETURNS boolean
+   LANGUAGE sql SECURITY DEFINER STABLE
+   AS $$ SELECT EXISTS (SELECT 1 FROM user_roles
+                        WHERE user_id = auth.uid() AND role = 'admin') $$;
+   ```
+   Never trust a role value sent from the client.
 
-The consultant's closing paragraph — résumés, compensation, interview notes,
-rankings, client information — is the direction this architecture already
-anticipates:
+### D. Public file-storage buckets
 
-- **Client role**: client-company users see only their own company's
-  positions and candidate slates. Company assignment is admin-only, guarded at
-  the database-trigger level like role changes.
-- **Disclosure ladder**: candidates appear to client companies as *anonymous*
-  (summary only) → *identified* (name + profile) → *full* (adds CV), controlled
-  per-candidate by admins and enforced by row-level security — not by the UI.
-- **Read auditing**: staff profile views, staff CV downloads, client slate
-  views, and client CV downloads are all written to an append-only audit log.
-- **Narrowed support visibility**: support staff have no access to recruiting
-  tables. Future compensation and interview-note tables should follow the same
-  pattern: separate tables, strictest-possible policies, read-audited.
+**Fix in Supabase Storage:**
+1. Inventory buckets (Dashboard → Storage). Set every bucket holding résumés,
+   client files, or member documents to **private**.
+2. Add policies on `storage.objects` so users reach only their own folder,
+   using the convention that uploads go under `auth.uid()/...`:
+   ```sql
+   CREATE POLICY "own files" ON storage.objects
+     FOR SELECT USING (
+       bucket_id = 'resumes'
+       AND (storage.foldername(name))[1] = auth.uid()::text
+     );
+   ```
+   (Mirror the same check on INSERT/UPDATE/DELETE with `WITH CHECK`.)
+3. When a file must be shared (e.g., staff reviewing a résumé), generate a
+   **short-lived signed URL** (`createSignedUrl`, minutes not days) — never
+   flip the bucket to public.
+
+### E. AI-generated policies that are technically valid but too permissive
+
+**Fix / verification practice:**
+1. Manually review every policy Lovable generated: does each table have
+   separate, scoped policies for all four operations? Do UPDATE/INSERT
+   policies include `WITH CHECK`? Is there any `USING (true)` on private data?
+2. Run both **Lovable's security scan** and **Supabase's Security Advisor**
+   after changes — and treat them as smoke detectors, not sign-off.
+3. Add a repeatable policy test (see checklist item 2 below) so permissiveness
+   regressions are caught when Lovable regenerates or edits schema.
+
+### F. Sensitive operations running in the browser
+
+**Fix in Supabase:**
+1. Move payments, admin mutations, and any third-party API call that uses a
+   secret (Stripe, email, AI providers) into **Edge Functions**.
+2. Store those credentials as function secrets (`supabase secrets set`);
+   verify the caller's JWT inside the function before acting.
+3. The browser should only ever hold: the anon key, the user's own session
+   token, and calls to Edge Functions / RLS-protected tables.
+
+---
+
+## Part 2 — The nine-point minimum checklist, applied to the DEV app
+
+| # | Checklist item | Action on the current Lovable + Supabase app |
+|---|---|---|
+| 1 | Turn on RLS for every table, including profile and junction tables | Run the audit query from Part A; enable RLS everywhere, **including** junction/link tables (they leak relationships even when the main tables are locked). Add scoped per-operation policies. Re-check Security Advisor until it reports zero unprotected tables. |
+| 2 | Test the app logged out and as a different user | Create two throwaway test accounts. Test three ways: (a) the UI logged out, (b) the UI as user B trying to reach user A's data, and (c) **directly against the REST API** with the anon key and with user B's JWT (curl/Postman) — attackers use the API, not the UI. Script these calls so they can be rerun after every change. |
+| 3 | Confirm users can only retrieve their own records | Using user B's session in the API tests above, attempt `select` on user A's rows in every table (profiles, documents, payments, notes, junctions). Expect zero rows everywhere. Any row returned = a policy to fix before anything else ships. |
+| 4 | Search the code for service_role, sb_secret, passwords, Stripe keys | Search the repository, Lovable-generated files, environment files, **and Lovable prompt history** for `service_role`, `sb_secret`, `sk_live`, `password`, `api_key`. Anything found in frontend-reachable code: remove it, move it to Edge Function secrets, and **rotate the exposed key**. |
+| 5 | Keep privileged code in Edge Functions, not React files | Inventory every place the frontend writes data or calls an external service. Anything requiring elevated rights or a secret becomes an Edge Function; the React code calls the function with the user's JWT and receives only what that user may see. |
+| 6 | Review Supabase Storage bucket policies | Set résumé/document buckets to private; add per-user `storage.objects` policies (Part D); replace any public URLs already shared with signed URLs; confirm no bucket holding member data is public. |
+| 7 | Enable two-factor authentication | Turn on 2FA for the **Lovable account** and the **Supabase account** (and GitHub, if the project syncs there). Also enable Supabase Auth's leaked-password protection and email confirmation for app users while in that settings area. |
+| 8 | Run Lovable's security scan after every meaningful database change | Make it a standing rule: schema change → run Lovable security scan → run Supabase Security Advisor → rerun the item-2/3 API test script. Keep the checklist in the repo so it survives team changes. |
+| 9 | No real health/financial/SSN/confidential client data before a professional review | Keep DEV on synthetic data only. Before real candidate résumés, compensation, interview notes, rankings, or client information enter the system: commission an independent security review of the Supabase policies, enable database backups/PITR, and turn on the auth hardening from item 7. |
+
+---
+
+## Part 3 — Because this is an executive-search application
+
+The consultant is right to classify it as a **confidential-data application**.
+Beyond the checklist, three practices fit the data it will hold, all within
+Supabase:
+
+1. **Separate the most sensitive data.** Keep compensation, interview notes,
+   and rankings in their own tables with the strictest policies (staff-only),
+   rather than as columns on a general profile table — so one permissive
+   profile policy can never expose them.
+2. **Audit access.** Add an append-only audit table (insert-only policy)
+   written by triggers or Edge Functions for sensitive reads/writes — who
+   viewed a candidate's compensation or downloaded a résumé, and when.
+3. **Disclose progressively to clients.** If client companies will view
+   candidates, gate identity/CV visibility per candidate through a junction
+   table checked in RLS — anonymous summary first, identity and documents only
+   when explicitly raised — so disclosure is a database rule, not a UI
+   convention.
+
+**Bottom line:** the current Lovable + Supabase app can absolutely be made
+production-grade for this use case. The sequence that matters: lock down RLS
+(items 1–3) → sweep and rotate secrets (4) → move privileged logic to Edge
+Functions (5) → close storage (6) → then the operating habits (7–8) — and hold
+the line on item 9 until an independent review passes.
